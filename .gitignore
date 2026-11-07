@@ -6,3 +6,5 @@ api.ini
 .vs/
 dist/
 *.zip
+tests/
+.github/

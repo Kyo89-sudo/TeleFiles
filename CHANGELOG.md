@@ -5,8 +5,7 @@
 ### Correzioni
 - **"InputFile is not specified" all'invio**: la TDLib di vcpkg (1.8.69) ha cambiato lo schema e
   `inputMessageDocument.document` ora è un oggetto `inputDocument` che contiene il file. Il file
-  veniva passato nel formato vecchio e TDLib lo ignorava. Il server di prova ora rifiuta il formato
-  vecchio come quello vero.
+  veniva passato nel formato vecchio e TDLib lo ignorava.
 - **Upload riscritto** ("Invio non riuscito: Input file is not specified", divisione che si
   bloccava, upload fermi al 100%): non si usa più `preliminaryUploadFile`, che con i server veri
   non completa il caricamento finché il file non viene usato in un messaggio. Ora ogni file (o
@@ -67,10 +66,6 @@
   TaskDialog con "Annulla" predefinito per le azioni distruttive.
 - Layout adattivo: nelle finestre strette spariscono la colonna Data e il testo dei pulsanti,
   la barra di avanzamento dei trasferimenti lascia spazio alla percentuale.
-
-### Test
-- Simulazione: 97 controlli (nuovi: canali, cartelle, eliminazione, permessi, upload realistici,
-  gara d'invio, download bloccati e ripresi), puliti con ASan/UBSan e TSan.
 
 ## 0.1.0 — 2026-11-05
 
@@ -134,8 +129,3 @@ Prima versione.
 - Il tema passa dal registro a `settings.json`.
 - `build.bat` crea anche `dist\TeleFiles-0.1.0-portable.zip`.
 
-### Test
-- `tests/fake_td.cpp`: server Telegram simulato con la stessa API JSON di TDLib.
-- `tests/sim_main.cpp`: 66 controlli (accesso, ricerca, pausa/ripresa, paralleli, divisione,
-  corruzione, riavvio, parti mancanti, Premium, logout+QR, portable spostato su un'altra unità);
-  puliti con ASan/UBSan e TSan.

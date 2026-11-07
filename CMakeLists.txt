@@ -5,7 +5,6 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(TELEFILES_PORTABLE "Exe sempre portable (altrimenti basta il file TeleFiles.portable accanto all'exe)" OFF)
-option(TELEFILES_BUILD_SIM "Compila la simulazione (server Telegram finto, nessun account)" OFF)
 set(TELEFILES_API_ID "" CACHE STRING "api_id di my.telegram.org (facoltativo: in alternativa api.ini)")
 set(TELEFILES_API_HASH "" CACHE STRING "api_hash di my.telegram.org (facoltativo)")
 
@@ -50,12 +49,4 @@ if(WIN32)
         # il manifest è già nelle risorse
         target_link_options(TeleFiles PRIVATE /MANIFEST:NO)
     endif()
-endif()
-
-if(TELEFILES_BUILD_SIM)
-    add_executable(telefiles_sim ${CORE_SOURCES} tests/fake_td.cpp tests/sim_main.cpp)
-    target_include_directories(telefiles_sim PRIVATE tests/shim)
-    target_link_libraries(telefiles_sim PRIVATE nlohmann_json::nlohmann_json)
-    find_package(Threads REQUIRED)
-    target_link_libraries(telefiles_sim PRIVATE Threads::Threads)
 endif()

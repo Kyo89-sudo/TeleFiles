@@ -86,15 +86,6 @@ H<sha256 del file intero>
 
 L'hashtag serve a TeleFiles per ritrovare tutte le parti con una ricerca nella chat.
 
-## Simulazione (senza account)
-
-`tests/fake_td.cpp` è un server Telegram finto che espone la stessa API di TDLib; `tests/sim_main.cpp`
-lo usa per verificare tutto il motore (94 controlli). Su Linux o WSL:
-
-```sh
-cmake -S . -B build-sim -DTELEFILES_BUILD_SIM=ON && cmake --build build-sim && ./build-sim/telefiles_sim
-```
-
 ## Limiti noti
 
 - Telegram limita la dimensione **per singolo file** (2000 MiB, 4000 MiB con Premium); la divisione
