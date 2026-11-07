@@ -1,0 +1,27 @@
+TeleFiles Portable 0.2.0
+========================
+
+Non serve installare nulla: TeleFiles.exe è un unico file senza DLL.
+Funziona da qualsiasi cartella o chiavetta USB e non scrive nel registro.
+
+Primo avvio
+-----------
+1. Vai su https://my.telegram.org -> "API development tools" e crea un'applicazione
+   (gratis, serve a ogni client non ufficiale).
+2. Rinomina "api.ini.example" in "api.ini" e inserisci i tuoi api_id e api_hash.
+3. Avvia TeleFiles.exe e accedi con il codice QR o con il numero di telefono.
+
+Cosa c'è nella cartella
+-----------------------
+TeleFiles.exe        il programma
+TeleFiles.portable   attiva la modalità portable (se lo cancelli, i dati vanno in %LOCALAPPDATA%)
+api.ini              le tue credenziali API
+Data\                sessione di Telegram, impostazioni, coda dei trasferimenti
+Download\            cartella di download predefinita (modificabile)
+
+I percorsi dentro questa cartella vengono salvati come relativi: se la chiavetta
+cambia lettera di unità, coda e impostazioni continuano a funzionare.
+
+Attenzione: la cartella Data contiene la sessione del tuo account Telegram.
+Chi la copia può accedere al tuo account: non condividerla. Per revocarla usa
+"Esci dall'account" oppure, dal telefono, Impostazioni -> Dispositivi.

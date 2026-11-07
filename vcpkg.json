@@ -1,0 +1,9 @@
+{
+  "name": "telefiles",
+  "version": "0.2.0",
+  "builtin-baseline": "29718cfec805208b4e2d80ed91e681143b488dd7",
+  "dependencies": [
+    "tdlib",
+    "nlohmann-json"
+  ]
+}

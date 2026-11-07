@@ -1,0 +1,8 @@
+build/
+out/
+vcpkg_installed/
+api.ini
+*.user
+.vs/
+dist/
+*.zip

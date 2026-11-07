@@ -1,0 +1,28 @@
+#include <windows.h>
+#include "../src/app/Version.h"
+
+1 ICON "TeleFiles.ico"
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "TeleFiles.manifest"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION TELEFILES_VERSION_RC
+PRODUCTVERSION TELEFILES_VERSION_RC
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "041004B0"
+    BEGIN
+      VALUE "FileDescription", "TeleFiles - upload e download di file su Telegram"
+      VALUE "ProductName", "TeleFiles"
+      VALUE "FileVersion", TELEFILES_VERSION_STR
+      VALUE "ProductVersion", TELEFILES_VERSION_STR
+      VALUE "OriginalFilename", "TeleFiles.exe"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0410, 1200
+  END
+END

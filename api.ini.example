@@ -1,0 +1,4 @@
+; Credenziali API di Telegram (gratuite): https://my.telegram.org -> API development tools
+; Copia questo file come "api.ini" accanto a TeleFiles.exe oppure in %APPDATA%\TeleFiles\
+api_id=123456
+api_hash=0123456789abcdef0123456789abcdef

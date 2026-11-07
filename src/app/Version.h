@@ -1,0 +1,4 @@
+#pragma once
+#define TELEFILES_VERSION "0.2.0"
+#define TELEFILES_VERSION_RC 0,2,0,0
+#define TELEFILES_VERSION_STR "0.2.0"
