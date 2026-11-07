@@ -5,8 +5,7 @@
 <h1 align="center">TeleFiles</h1>
 
 <p align="center">
-  Client Telegram per Windows dedicato solo a <b>caricare e scaricare file</b>.<br>
-  <a href="https://github.com/Kyo89-sudo/TeleFiles/releases/latest"><b>Scarica l'ultima versione</b></a>
+  Client Telegram per Windows dedicato solo a <b>caricare e scaricare file</b>.
 </p>
 
 Niente chat, niente messaggi: una lista di file per ogni chat, una coda di trasferimenti con pausa
@@ -103,3 +102,20 @@ cmake -S . -B build-sim -DTELEFILES_BUILD_SIM=ON && cmake --build build-sim && .
 - Senza Premium Telegram può limitare la velocità di download: un client diverso non cambia questo.
 - La pausa di un upload riparte dalla parte in corso; la ripresa parziale della stessa parte dipende da TDLib.
 - Lo sfondo della barra laterale è un colore pieno in stile Mica, non l'effetto traslucido di sistema.
+
+## Aiuto
+
+- **Problemi o richieste**: apri una segnalazione su
+  [github.com/Kyo89-sudo/TeleFiles/issues](https://github.com/Kyo89-sudo/TeleFiles/issues).
+  Se un trasferimento si blocca o fallisce, allega il registro `telefiles.log`
+  (`%LOCALAPPDATA%\TeleFiles\telefiles.log`, oppure `Data\telefiles.log` nella versione portable):
+  annota invii, parti, riavvii ed errori, non contiene messaggi né credenziali.
+- **Codice sorgente e aggiornamenti**: [github.com/Kyo89-sudo/TeleFiles](https://github.com/Kyo89-sudo/TeleFiles).
+- Altri progetti: [github.com/Kyo89-sudo](https://github.com/Kyo89-sudo).
+
+## Licenza
+
+TeleFiles è distribuito con licenza [MIT](LICENSE). Usa [TDLib](https://github.com/tdlib/td)
+(Boost Software License 1.0), [nlohmann/json](https://github.com/nlohmann/json) (MIT) e
+[QR Code generator](https://github.com/nayuki/QR-Code-generator) di Nayuki (MIT).
+TeleFiles non è un'app ufficiale di Telegram.
