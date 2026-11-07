@@ -1,8 +1,17 @@
-# TeleFiles
+<p align="center">
+  <img src="docs/icon.png" width="128" height="128" alt="Icona di TeleFiles">
+</p>
 
-Client Telegram per Windows dedicato solo a **caricare e scaricare file**. Niente chat, niente
-messaggi: una lista di file per ogni chat, una coda di trasferimenti con pausa e ripresa, e la
-**divisione automatica** dei file oltre il limite di Telegram (2 GB, 4 GB con Premium).
+<h1 align="center">TeleFiles</h1>
+
+<p align="center">
+  Client Telegram per Windows dedicato solo a <b>caricare e scaricare file</b>.<br>
+  <a href="https://github.com/Kyo89-sudo/TeleFiles/releases/latest"><b>Scarica l'ultima versione</b></a>
+</p>
+
+Niente chat, niente messaggi: una lista di file per ogni chat, una coda di trasferimenti con pausa
+e ripresa, e la **divisione automatica** dei file oltre il limite di Telegram (2 GB, 4 GB con
+Premium).
 
 Basato su [TDLib](https://github.com/tdlib/td), la libreria ufficiale di Telegram per i client.
 
