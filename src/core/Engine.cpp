@@ -759,14 +759,15 @@ void Engine::loadMore() {
 void Engine::requestPage() {
     listLoading_ = true;
     uint64_t gen = listGen_;
-    // Solo i campi stabili tra le versioni di TDLib: quelli mancanti prendono il valore predefinito.
+    // TDLib non garantisce tutte le combinazioni di query e filtro.
+    // Con una query applichiamo il filtro dopo aver interpretato i file della risposta.
     td_->send({{"@type", "searchChatMessages"},
                {"chat_id", selChat_},
                {"query", query_},
                {"from_message_id", nextFromMsg_},
                {"offset", 0},
                {"limit", 100},
-               {"filter", {{"@type", filterType(filter_)}}}},
+               {"filter", {{"@type", filterType(query_.empty() ? filter_ : Filter::All)}}}},
               [this, gen](const json& r) { handlePage(gen, r); });
 }
 
@@ -776,6 +777,7 @@ void Engine::handlePage(uint64_t gen, const json& r) {
     listLoading_ = false;
     if (TdClient::isError(r)) {
         listMore_ = false;
+        if (!query_.empty()) notice("Ricerca non riuscita: " + jstr(r, "message"), true);
         changed();
         return;
     }
@@ -786,13 +788,21 @@ void Engine::handlePage(uint64_t gen, const json& r) {
         for (auto& m : msgs) {
             std::vector<FileEntry> v;
             addMessage(m, v);
-            for (auto& e : v) mergeEntry(e);
+            for (auto& e : v) {
+                if (!query_.empty()) {
+                    if (filter_ == Filter::Documents && e.kind != FileKind::Document) continue;
+                    if (filter_ == Filter::Video && e.kind != FileKind::Video) continue;
+                    if (filter_ == Filter::Audio && e.kind != FileKind::Audio) continue;
+                    if (filter_ == Filter::Photos && e.kind != FileKind::Photo) continue;
+                }
+                mergeEntry(e);
+            }
             lastId = jint(m, "id");
         }
     }
     int64_t next = jint(r, "next_from_message_id");
     if (!r.contains("next_from_message_id")) next = lastId;  // versioni vecchie
-    listMore_ = msgs.is_array() && !msgs.empty() && next != 0;
+    listMore_ = next != 0 && (nextFromMsg_ == 0 || next < nextFromMsg_);
     nextFromMsg_ = next;
     // Con "Tutti" molte righe sono testo: se la pagina ha portato pochi file, continua.
     if (listMore_ && entries_.size() - before < 20 && entries_.size() < 60) requestPage();
