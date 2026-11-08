@@ -192,9 +192,7 @@ void Engine::shutdown() {
         td = td_.get();
         if (td) td->send({{"@type", "close"}});
     }
-    // attende i thread di lavoro e la chiusura ordinata di TDLib (max ~5 s)
-    for (int i = 0; i < 50 && workers_.load() > 0; ++i)
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // Ferma la ricezione prima di attendere i worker, così non arrivano nuovi aggiornamenti.
     if (td) {
         for (int i = 0; i < 30; ++i) {
             {
@@ -205,6 +203,9 @@ void Engine::shutdown() {
         }
         td->stop();
     }
+    // I worker usano ancora l'engine e il client. Un I/O lento può superare il timeout di TDLib.
+    while (workers_.load() > 0)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     std::lock_guard<std::recursive_mutex> g(mu_);
     td_.reset();
 }
@@ -266,8 +267,8 @@ void Engine::tick() {
         }
         schedule();
         if (queueDirty_) saveQueue();
-        recreate = recreateClient_;
-        recreateClient_ = false;
+        recreate = recreateClient_ && workers_.load() == 0;
+        if (recreate) recreateClient_ = false;
     }
     if (recreate) {
         // Dopo il logout TDLib chiude il client: ne serve uno nuovo per un nuovo accesso.
@@ -443,8 +444,14 @@ void Engine::onAuthState(const json& st) {
             selChat_ = savedChatId_ = 0;
             fileToTransfer_.clear();
             sendingMsg_.clear();
+            earlySend_.clear();
             if (auth_.state == AuthState::LoggingOut) {
-                // nuovo account: la coda del precedente non ha più senso
+                // I worker devono rilasciare i trasferimenti prima di distruggerli.
+                for (auto& t : transfers_) {
+                    if (!t->workerBusy) continue;
+                    t->abort->store(true);
+                    t->cancelRequested = true;
+                }
                 transfers_.erase(std::remove_if(transfers_.begin(), transfers_.end(),
                                                 [](const std::unique_ptr<Transfer>& x) { return !x->workerBusy; }),
                                  transfers_.end());
@@ -1315,7 +1322,8 @@ void Engine::collectGroupParts(Transfer& t) {
                       return;
                   }
                   tx->parts.clear();
-                  for (auto& p : tx->entry.parts) tx->parts.push_back(p.second);
+                  for (int i = 1; i <= tx->entry.partCount; ++i)
+                      tx->parts.push_back(tx->entry.parts.at(i));
                   tx->partsCollected = true;
                   if (tx->pauseRequested) { tx->pauseRequested = false; tx->st = TStatus::Paused; schedule(); changed(); return; }
                   startDownloadPart(*tx);
@@ -1345,8 +1353,12 @@ void Engine::startDownloadPart(Transfer& t) {
         int tid = t.id;
         runWorker(tid, [this, tid](Transfer& tr, std::function<bool(int64_t)> progress) {
             std::error_code ec;
-            if (fileExists(tr.partialPath)) fs::resize_file(u8p(tr.partialPath), (uintmax_t)tr.baseDone, ec);
-            bool ok = !ec;
+            const int64_t size = fileSize(tr.partialPath);
+            bool ok = tr.baseDone >= 0 && (size >= tr.baseDone || (size < 0 && tr.baseDone == 0));
+            if (ok && size > tr.baseDone) {
+                fs::resize_file(u8p(tr.partialPath), (uintmax_t)tr.baseDone, ec);
+                ok = !ec;
+            }
             Sha256 h;
             if (ok && tr.baseDone > 0) {
                 InFile in;
@@ -1379,6 +1391,10 @@ void Engine::startDownloadPart(Transfer& t) {
             if (tr.pauseRequested) { tr.pauseRequested = false; tr.st = TStatus::Paused; schedule(); changed(); return; }
             startDownloadPart(tr);
         });
+        return;
+    }
+    if (group && (t.curPart < 0 || t.curPart >= static_cast<int>(t.parts.size()))) {
+        fail(t, "Stato del download non valido. Aggiungi di nuovo il file alla coda.");
         return;
     }
     int32_t fid = group ? t.parts[t.curPart].fileId : t.entry.fileId;
@@ -1444,6 +1460,7 @@ void Engine::onDownloadPartDone(Transfer& t, const std::string& localPath) {
             bool ok = moveFile(localPath, tr.destPath);
             std::lock_guard<std::recursive_mutex> g(mu_);
             tr.workerBusy = false;
+            if (tr.cancelRequested) { cancel(tid); return; }
             if (!ok) { fail(tr, "Impossibile salvare in " + tr.destPath); return; }
             td_->send({{"@type", "deleteFile"}, {"file_id", tr.curFileId}});  // libera la cache TDLib
             finishDownload(tr);
@@ -1459,13 +1476,22 @@ void Engine::onDownloadPartDone(Transfer& t, const std::string& localPath) {
         int64_t base = tr.baseDone;
         std::string err, sha;
         Sha256 before = tr.running;
-        bool ok = appendPart(localPath, tr.partialPath, tr.running, sha,
-                             [&](int64_t v) { return progress(base + v); }, err);
+        const int64_t partialSize = fileSize(tr.partialPath);
+        const bool partialValid = partialSize == base || (base == 0 && partialSize < 0);
+        bool ok = false;
+        if (partialValid) {
+            ok = appendPart(localPath, tr.partialPath, tr.running, sha,
+                            [&](int64_t v) { return progress(base + v); }, err);
+        } else {
+            err = "Il file parziale è stato modificato. Riprova per verificare le parti salvate.";
+        }
         if (ok && !part.sha.empty() && part.sha != sha) {
             ok = false;
             err = "Parte " + std::to_string(part.index) + " corrotta (hash diverso): verrà riscaricata";
         }
-        if (!ok) {
+        if (!partialValid) {
+            tr.hashValid = false;
+        } else if (!ok) {
             // riporta il parziale allo stato precedente
             std::error_code ec;
             fs::resize_file(u8p(tr.partialPath), (uintmax_t)base, ec);
