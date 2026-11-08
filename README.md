@@ -5,28 +5,23 @@
 <h1 align="center">TeleFiles</h1>
 
 <p align="center">
-  Client Telegram per Windows dedicato solo a <b>caricare e scaricare file</b>.
+  <strong>Carica, scarica e organizza i tuoi file Telegram da Windows.</strong>
 </p>
 
-Niente chat, niente messaggi: una lista di file per ogni chat, una coda di trasferimenti con pausa
-e ripresa, e la **divisione automatica** dei file oltre il limite di Telegram (2 GB, 4 GB con
-Premium).
+TeleFiles è un client Telegram dedicato ai file. Scegli una chat, un gruppo o un canale per vedere i file condivisi, cercarli e scaricarli. Per inviare un file o una cartella, trascinalo nella finestra e segui l'avanzamento nella coda dei trasferimenti.
 
-Basato su [TDLib](https://github.com/tdlib/td), la libreria ufficiale di Telegram per i client.
+Se un file supera il limite del tuo account Telegram, TeleFiles lo divide automaticamente e invia ogni parte come documento. Quando lo scarichi con TeleFiles, l'app riunisce le parti e ne verifica l'integrità con SHA-256.
 
-## Funzioni
+## Cosa puoi fare
 
-- Accesso con **codice QR** o con **numero + codice** (anche con verifica in due passaggi); si fa una volta sola.
-- Profilo con stato **Premium / gratuito** e pulsante **Passa a Premium**.
-- Elenco file per chat con **ricerca**, filtri (Documenti, Video, Audio, Foto) e selezione multipla.
-- **Crea ed elimina canali/gruppi**, **elimina file** (anche divisi, tutte le parti).
-- **Carica cartelle intere**: la struttura delle sottocartelle viene ricreata al download.
-- **Download e upload** in coda, paralleli (1–5), con **pausa / ripresa** anche dopo un riavvio dell'app.
-- **Divisione automatica**: i file troppo grandi vengono caricati in parti (`nome.001`, `.002`, …) e
-  ricomposti da soli al download, con verifica SHA-256 di ogni parte e del file finale.
-  Le parti si possono riunire anche a mano con 7-Zip ("Unisci file") o con `copy /b`.
-- Trascina i file nella finestra per caricarli nella chat aperta.
-- Tema chiaro / scuro / come il sistema, stile Windows 11.
+- **Trovare i file nelle chat.** Cerca per nome, filtra per tipo e seleziona più elementi per scaricarli o eliminarli.
+- **Caricare cartelle intere.** TeleFiles conserva i percorsi relativi e ricrea le sottocartelle al download.
+- **Gestire più trasferimenti.** Avvia fino a cinque trasferimenti in parallelo dal menu. Puoi mettere in pausa la coda e riprenderla anche dopo aver riaperto l'app.
+- **Inviare file oltre il limite di Telegram.** TeleFiles li divide in parti numerate e le riunisce al download. Il limite per singolo documento dipende dal piano del tuo account.
+- **Accedere con il tuo account Telegram.** Usa il codice QR oppure il numero di telefono con codice e, se attiva, la verifica in due passaggi.
+- **Usare la versione portable.** Porta con te l'eseguibile, le impostazioni e la coda nella stessa cartella.
+
+TeleFiles usa [TDLib](https://github.com/tdlib/td), la libreria ufficiale di Telegram per lo sviluppo di client. Puoi scegliere il tema chiaro, scuro o di sistema.
 
 ## Compilazione
 
