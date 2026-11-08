@@ -1059,6 +1059,12 @@ void Engine::resume(int id) {
     Transfer* t = find(id);
     if (!t) return;
     t->pauseRequested = false;
+    if (t->dir == Direction::Upload && t->prepared &&
+        (t->partIdx < 0 || t->partIdx >= t->partCount || t->partLen(t->partIdx) <= 0)) {
+        if (t->st == TStatus::Paused || t->st == TStatus::Error)
+            fail(*t, "Stato dell'invio non valido. Controlla le parti in chat e aggiungi di nuovo il file.");
+        return;
+    }
     if (t->st == TStatus::Paused || t->st == TStatus::Error) {
         t->st = TStatus::Queued;
         t->error.clear();
@@ -1157,7 +1163,7 @@ void Engine::schedule() {
         if (t->active()) ++active;
     for (auto& t : transfers_) {
         if (active >= settings_.maxParallel) break;
-        if (t->st == TStatus::Queued) {
+        if (t->st == TStatus::Queued && !t->stopWhenKnown) {
             ++active;
             startTransfer(*t);
         }
@@ -1652,8 +1658,10 @@ void Engine::uploadPath(Transfer& t, const std::string& path) {
                   if (!tx) return;
                   if (TdClient::isError(r)) {
                       tx->sending = false;
+                      bool stopped = tx->stopWhenKnown;
                       tx->stopWhenKnown = false;
                       if (tx->cancelRequested) { cancel(tid); return; }
+                      if (stopped) { schedule(); changed(); return; }
                       fail(*tx, "Invio non riuscito: " + jstr(r, "message"));
                       return;
                   }
@@ -1672,6 +1680,8 @@ void Engine::uploadPath(Transfer& t, const std::string& path) {
                       tx->stopWhenKnown = false;
                       stopPendingUpload(*tx);
                       if (tx->cancelRequested) { cancel(tid); return; }
+                      schedule();
+                      changed();
                       return;
                   }
                   if (file.is_object()) onFile(file);
@@ -1693,11 +1703,12 @@ void Engine::onSendSucceeded(int64_t oldMsgId, const json& msg) {
     if (it == sendingMsg_.end()) return;
     Transfer* t = find(it->second);
     sendingMsg_.erase(it);
-    if (!t) return;
+    if (!t || !t->sending || t->sendingMsgId != oldMsgId) return;
     t->sending = false;
     t->sendingMsgId = 0;
     fileToTransfer_.erase(t->upFileId);
     t->upFileId = 0;
+    if (t->st != TStatus::Active || t->partIdx < 0 || t->partIdx >= t->partCount) return;
     if (t->split && !t->tempPart.empty()) {
         removeFile(t->tempPart);
         t->tempPart.clear();
@@ -1739,9 +1750,13 @@ void Engine::onSendFailed(int64_t oldMsgId, const std::string& err) {
     if (it == sendingMsg_.end()) return;
     Transfer* t = find(it->second);
     sendingMsg_.erase(it);
-    if (!t) return;
+    if (!t || !t->sending || t->sendingMsgId != oldMsgId) return;
     t->sending = false;
+    t->sendingMsgId = 0;
+    fileToTransfer_.erase(t->upFileId);
+    t->upFileId = 0;
     if (t->cancelRequested) { cancel(t->id); return; }
+    if (t->st != TStatus::Active) return;
     // al prossimo tentativo si ricarica la stessa parte
     t->done = t->baseDone;
     fail(*t, "Invio non riuscito: " + err);
