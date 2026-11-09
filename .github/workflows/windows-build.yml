@@ -17,6 +17,8 @@ jobs:
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\vcpkg-cache
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: f31f67c95dc7f7efd89523e4e663cfdabe413159
 
       - name: Versione
         id: ver
