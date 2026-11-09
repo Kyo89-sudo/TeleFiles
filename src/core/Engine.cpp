@@ -152,7 +152,6 @@ struct Engine::Transfer {
     int32_t upFileId = 0;
     bool sending = false;            // messaggio con il file in corso (TDLib carica e poi invia)
     int64_t sendingMsgId = 0;        // id temporaneo del messaggio, noto dalla risposta a sendMessage
-    int rateLimitRetries = 0;
     bool stopWhenKnown = false;      // pausa/annulla chiesti prima di conoscere l'id: ritirarlo appena arriva
 
     bool active() const {
@@ -1078,7 +1077,6 @@ void Engine::resume(int id) {
     }
     if (t->st == TStatus::Paused || t->st == TStatus::Error) {
         t->st = TStatus::Queued;
-        t->rateLimitRetries = 0;
         t->error.clear();
     }
     queueDirty_ = true;
@@ -1762,7 +1760,6 @@ void Engine::onSendSucceeded(int64_t oldMsgId, const json& msg) {
     t->done = t->baseDone;
     log("inviata parte " + std::to_string(t->partIdx + 1) + "/" + std::to_string(t->partCount) + ": " + t->name);
     t->partIdx++;
-    t->rateLimitRetries = 0;
     queueDirty_ = true;
     if (t->partIdx < t->partCount) {
         if (t->pauseRequested) {
@@ -1803,7 +1800,9 @@ void Engine::onSendFailed(int64_t oldMsgId, const std::string& err) {
 }
 
 static int uploadRetrySeconds(std::string_view error) {
-    constexpr std::string_view prefixes[] = {"Too Many Requests: retry after ", "FLOOD_WAIT_"};
+    constexpr std::string_view prefixes[] = {
+        "Too Many Requests: retry after ", "FLOOD_WAIT_", "FLOOD_PREMIUM_WAIT_"
+    };
     for (auto prefix : prefixes) {
         if (error.substr(0, prefix.size()) != prefix) continue;
         error.remove_prefix(prefix.size());
@@ -1818,22 +1817,20 @@ static int uploadRetrySeconds(std::string_view error) {
 void Engine::handleUploadFailure(Transfer& t, const std::string& error) {
     t.done = t.baseDone;
     const int seconds = uploadRetrySeconds(error);
-    if (seconds > 0) {
-        const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
-        uploadsBlockedUntil_ = std::max(uploadsBlockedUntil_, until);
-        if (t.rateLimitRetries < 3) {
-            ++t.rateLimitRetries;
-            t.st = TStatus::Queued;
-            t.speed = 0;
-            queueDirty_ = true;
-            const auto message = "Limite Telegram: attesa di almeno " + std::to_string(seconds) + " s.";
-            log(message + " Nuovo tentativo per " + t.name);
-            notice(message + " L'invio riprenderà automaticamente.");
-            schedule();
-            return;
-        }
+    if (seconds <= 0) {
+        fail(t, "Invio non riuscito: " + error);
+        return;
     }
-    fail(t, "Invio non riuscito: " + error);
+
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
+    uploadsBlockedUntil_ = std::max(uploadsBlockedUntil_, until);
+    t.st = TStatus::Queued;
+    t.speed = 0;
+    queueDirty_ = true;
+    const auto message = "Limite Telegram: attesa di almeno " + std::to_string(seconds) + " s.";
+    log(message + " Nuovo tentativo per " + t.name);
+    notice(message + " L'invio riprenderà automaticamente.");
+    schedule();
 }
 
 // ---------------------------------------------------------------- canali, eliminazione, avvisi
