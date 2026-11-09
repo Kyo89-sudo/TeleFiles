@@ -3,6 +3,7 @@
 // possono essere chiamati dal thread dell'interfaccia.
 #pragma once
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -232,6 +233,7 @@ private:
     void stopPendingUpload(Transfer& t);
     void onSendSucceeded(int64_t oldMsgId, const json& msg);
     void onSendFailed(int64_t oldMsgId, const std::string& err);
+    void handleUploadFailure(Transfer& t, const std::string& error);
     void fail(Transfer& t, const std::string& err);
     void collectGroupParts(Transfer& t);
     void runWorker(int tid, std::function<void(Transfer&, std::function<bool(int64_t)>)> work);
@@ -278,6 +280,7 @@ private:
     std::map<int64_t, json> earlySend_;   // esiti di invio arrivati prima della risposta
     std::atomic<int> workers_{0};
     bool queueDirty_ = false;
+    std::chrono::steady_clock::time_point uploadsBlockedUntil_{};
     bool restored_ = false;
     bool recreateClient_ = false;
     bool shuttingDown_ = false;

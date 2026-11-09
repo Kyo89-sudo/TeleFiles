@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <charconv>
+#include <string_view>
 #include <cmath>
 #include <cstdio>
 #include <thread>
@@ -443,6 +445,7 @@ void Engine::onAuthState(const json& st) {
             sendingMsg_.clear();
             earlySend_.clear();
             if (auth_.state == AuthState::LoggingOut) {
+                uploadsBlockedUntil_ = {};
                 // I worker devono rilasciare i trasferimenti prima di distruggerli.
                 for (auto& t : transfers_) {
                     if (!t->workerBusy) continue;
@@ -1165,12 +1168,14 @@ void Engine::setSettings(const Settings& s) {
 
 void Engine::schedule() {
     if (shuttingDown_ || auth_.state != AuthState::Ready || !td_) return;
+    const bool uploadsBlocked = std::chrono::steady_clock::now() < uploadsBlockedUntil_;
     int active = 0;
     for (auto& t : transfers_)
         if (t->active()) ++active;
     for (auto& t : transfers_) {
         if (active >= settings_.maxParallel) break;
-        if (t->st == TStatus::Queued && !t->stopWhenKnown) {
+        if (t->st == TStatus::Queued && !t->stopWhenKnown &&
+            !(uploadsBlocked && t->dir == Direction::Upload)) {
             ++active;
             startTransfer(*t);
         }
@@ -1639,6 +1644,14 @@ void Engine::stopPendingUpload(Transfer& t) {
 // la fine con updateMessageSendSucceeded. (preliminaryUploadFile non completa mai il caricamento
 // finché il file non viene usato in un messaggio: non va usato qui.)
 void Engine::uploadPath(Transfer& t, const std::string& path) {
+    if (std::chrono::steady_clock::now() < uploadsBlockedUntil_) {
+        t.st = TStatus::Queued;
+        t.speed = 0;
+        queueDirty_ = true;
+        schedule();
+        changed();
+        return;
+    }
     const int64_t size = fileSize(path);
     if (size < 0) { fail(t, "File da inviare non accessibile"); return; }
     if (size == 0) { fail(t, "Il file da inviare è vuoto (0 byte)"); return; }
@@ -1688,7 +1701,7 @@ void Engine::uploadPath(Transfer& t, const std::string& path) {
                       tx->stopWhenKnown = false;
                       if (tx->cancelRequested) { cancel(tid); return; }
                       if (stopped) { schedule(); changed(); return; }
-                      fail(*tx, "Invio non riuscito: " + jstr(r, "message"));
+                      handleUploadFailure(*tx, jstr(r, "message"));
                       return;
                   }
                   tx->sendingMsgId = jint(r, "id");
@@ -1783,9 +1796,41 @@ void Engine::onSendFailed(int64_t oldMsgId, const std::string& err) {
     t->upFileId = 0;
     if (t->cancelRequested) { cancel(t->id); return; }
     if (t->st != TStatus::Active) return;
-    // al prossimo tentativo si ricarica la stessa parte
-    t->done = t->baseDone;
-    fail(*t, "Invio non riuscito: " + err);
+    handleUploadFailure(*t, err);
+}
+
+static int uploadRetrySeconds(std::string_view error) {
+    constexpr std::string_view prefixes[] = {
+        "Too Many Requests: retry after ", "FLOOD_WAIT_", "FLOOD_PREMIUM_WAIT_"
+    };
+    for (auto prefix : prefixes) {
+        if (error.substr(0, prefix.size()) != prefix) continue;
+        error.remove_prefix(prefix.size());
+        int seconds = 0;
+        const auto end = error.data() + error.size();
+        const auto result = std::from_chars(error.data(), end, seconds);
+        if (result.ec == std::errc() && result.ptr == end && seconds > 0) return seconds;
+    }
+    return 0;
+}
+
+void Engine::handleUploadFailure(Transfer& t, const std::string& error) {
+    t.done = t.baseDone;
+    const int seconds = uploadRetrySeconds(error);
+    if (seconds <= 0) {
+        fail(t, "Invio non riuscito: " + error);
+        return;
+    }
+
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
+    uploadsBlockedUntil_ = std::max(uploadsBlockedUntil_, until);
+    t.st = TStatus::Queued;
+    t.speed = 0;
+    queueDirty_ = true;
+    const auto message = "Limite Telegram: attesa di almeno " + std::to_string(seconds) + " s.";
+    log(message + " Nuovo tentativo per " + t.name);
+    notice(message + " L'invio riprenderà automaticamente.");
+    schedule();
 }
 
 // ---------------------------------------------------------------- canali, eliminazione, avvisi
