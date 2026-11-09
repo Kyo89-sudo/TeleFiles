@@ -74,6 +74,15 @@ static D2D1_RECT_F R(float l, float t, float r, float b) { return D2D1::RectF(l,
 static bool inside(const D2D1_RECT_F& r, float x, float y) { return x >= r.left && x < r.right && y >= r.top && y < r.bottom; }
 static float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
+// Il ritaglio Direct2D non si applica alle aree cliccabili delle righe.
+static void clipRowHits(std::vector<Hit>& hits, size_t first, const D2D1_RECT_F& area) {
+    for (size_t i = first; i < hits.size(); ++i) {
+        auto& r = hits[i].r;
+        r = R(std::max(r.left, area.left), std::max(r.top, area.top),
+              std::min(r.right, area.right), std::min(r.bottom, area.bottom));
+    }
+}
+
 // geometrie condivise tra disegno e posizionamento dei controlli EDIT nativi
 static D2D1_RECT_F chatSearchRect() { return R(12, kTitleH + 4, kSideW - 48, kTitleH + 34); }
 static D2D1_RECT_F fileSearchRect(float W) {
@@ -737,6 +746,7 @@ void MainWindow::drawSidebar(float W, float H) {
     sc.view = bottom - top;
     sc.content = (float)vis.size() * rowH + 8;
     sc.pos = clampf(sc.pos, 0, std::max(0.f, sc.content - sc.view));
+    const size_t firstRowHit = hits_.size();
     rt_->PushAxisAlignedClip(sc.area, D2D1_ANTIALIAS_MODE_ALIASED);
     float y = top - sc.pos;
     for (auto* c : vis) {
@@ -787,6 +797,7 @@ void MainWindow::drawSidebar(float W, float H) {
         text(chats.empty() ? L"Caricamento chat…" : L"Nessuna chat trovata", R(16, top + 8, kSideW - 16, top + 40),
              fSmall_.Get(), pal_.text2, DWRITE_TEXT_ALIGNMENT_CENTER);
     rt_->PopAxisAlignedClip();
+    clipRowHits(hits_, firstRowHit, sc.area);
     drawScrollbar(SC_CHATS);
 
     // profilo
@@ -950,6 +961,7 @@ void MainWindow::drawFileList(D2D1_RECT_F a, bool narrow) {
     for (auto& t : eng_.transfers())
         if (t.dir == Direction::Download) tmap[t.entryKey] = t;
 
+    const size_t firstRowHit = hits_.size();
     rt_->PushAxisAlignedClip(sc.area, D2D1_ANTIALIAS_MODE_ALIASED);
     float y = sc.area.top + 2 - sc.pos;
     int idx = 0;
@@ -1045,6 +1057,7 @@ void MainWindow::drawFileList(D2D1_RECT_F a, bool narrow) {
              DWRITE_TEXT_ALIGNMENT_CENTER);
     }
     rt_->PopAxisAlignedClip();
+    clipRowHits(hits_, firstRowHit, sc.area);
     drawScrollbar(SC_LIST);
 
     // pagina successiva quando ci si avvicina al fondo; ordinando per nome o dimensione serve tutto l'elenco
@@ -1129,6 +1142,7 @@ void MainWindow::drawTransfers(D2D1_RECT_F a, bool collapsed) {
     sc.content = collapsed ? 0 : (float)list.size() * kTRowH + 4;
     sc.pos = clampf(sc.pos, 0, std::max(0.f, sc.content - sc.view));
     if (!collapsed && sc.view > 0) {
+        const size_t firstRowHit = hits_.size();
         rt_->PushAxisAlignedClip(sc.area, D2D1_ANTIALIAS_MODE_ALIASED);
         float y = sc.area.top - sc.pos;
         for (auto& t : list) {
@@ -1150,11 +1164,11 @@ void MainWindow::drawTransfers(D2D1_RECT_F a, bool collapsed) {
                      R(r.left + 8, cy - 12, r.left + 32, cy + 12), dc, 15, false, 2.0f);
 
                 float bx = r.right - 66;
-                float speedW = narrow ? 0.f : 128.f;
-                float barR = bx - 10 - speedW;
+                float statusW = narrow ? 94.f : 128.f;
+                float barR = bx - 10 - statusW;
                 float barL = std::max(r.left + 40 + 180, r.left + (r.right - r.left) * 0.42f);
                 if (barR - barL < 50) barL = barR;  // poco spazio: niente barra, solo testo
-                float textR = (barL < barR ? barL : bx) - 14;
+                float textR = barL - 14;
                 text(U(t.name), R(r.left + 40, r.top + 4, textR, r.top + 22), fBody_.Get(), pal_.text);
                 std::wstring sub;
                 if (t.status == TStatus::Error) sub = U(t.error);
@@ -1185,8 +1199,11 @@ void MainWindow::drawTransfers(D2D1_RECT_F a, bool collapsed) {
                         case TStatus::Paused: right = L"In pausa"; break;
                         case TStatus::Preparing:
                             if (down) right = L"Ricerca parti…";
-                            else if (prep) right = L"Preparo la parte " + std::to_wstring(std::min(t.part, t.partCount)) + L" · " +
-                                                   std::to_wstring((int)(t.prep * 100)) + L"%";
+                            else if (prep) {
+                                right = narrow ? L"Preparo " : L"Preparo la parte " +
+                                        std::to_wstring(std::min(t.part, t.partCount)) + L" · ";
+                                right += std::to_wstring((int)(t.prep * 100)) + L"%";
+                            }
                             else right = L"Preparazione…";
                             break;
                         case TStatus::Joining: right = down ? (t.partCount > 1 ? L"Unisco le parti…" : L"Salvataggio…") : L""; break;
@@ -1197,7 +1214,6 @@ void MainWindow::drawTransfers(D2D1_RECT_F a, bool collapsed) {
                             if (!eta.empty() && !narrow) right += L" · " + U(eta);
                         }
                     }
-                    if (narrow) right = std::to_wstring((int)(frac * 100)) + L"%";
                     text(right, R(barR + 8, r.top, bx - 6, r.bottom), fSmall_.Get(), pal_.text2, DWRITE_TEXT_ALIGNMENT_TRAILING);
                 } else if (t.status == TStatus::Done) {
                     text(down ? L"Completato" : L"Inviato", R(barR + 8, r.top, bx - 6, r.bottom), fSmall_.Get(), pal_.success,
@@ -1227,6 +1243,7 @@ void MainWindow::drawTransfers(D2D1_RECT_F a, bool collapsed) {
                  DWRITE_TEXT_ALIGNMENT_CENTER);
         }
         rt_->PopAxisAlignedClip();
+        clipRowHits(hits_, firstRowHit, sc.area);
         drawScrollbar(SC_TRANSFERS);
     }
 
@@ -2004,7 +2021,11 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         case WM_SIZE:
-            if (rt_) rt_->Resize(D2D1::SizeU(LOWORD(lp), HIWORD(lp)));
+            if (wp == SIZE_MINIMIZED) return 0;
+            if (rt_ && FAILED(rt_->Resize(D2D1::SizeU(LOWORD(lp), HIWORD(lp))))) {
+                rt_.Reset();
+                brush_.Reset();
+            }
             layoutEdits();
             InvalidateRect(hwnd_, nullptr, FALSE);
             return 0;
@@ -2016,6 +2037,8 @@ LRESULT MainWindow::handle(UINT msg, WPARAM wp, LPARAM lp) {
             createFormats();
             auto* r = reinterpret_cast<RECT*>(lp);
             SetWindowPos(hwnd_, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top, SWP_NOZORDER | SWP_NOACTIVATE);
+            layoutEdits();
+            InvalidateRect(hwnd_, nullptr, FALSE);
             return 0;
         }
         case WM_SETTINGCHANGE:
