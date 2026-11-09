@@ -226,9 +226,9 @@ void Engine::tick() {
                 t->speed = t->speed <= 0 ? inst : t->speed * 0.6 + inst * 0.4;
             else
                 t->speed = 0;
-            // trasferimento fermo: nessun byte per un po' (cambio di datacenter, rete caduta, TDLib
-            // che non riprende da solo) -> si riavvia la richiesta, TDLib riparte da dove era
-            if (t->st != TStatus::Active || t->workerBusy || (t->dir == Direction::Download && t->sending)) {
+            // Un upload in corso appartiene a TDLib: ritirare il messaggio per un calo di
+            // velocità può azzerare il progresso o sovrapporsi alla conferma dell'invio.
+            if (t->dir != Direction::Download || t->st != TStatus::Active || t->workerBusy || t->sending) {
                 t->progressMark = -1;
                 continue;
             }
@@ -250,7 +250,7 @@ void Engine::tick() {
             }
             log("nessun progresso da " + std::to_string(limitMs / 1000) + " s, riavvio (" + std::to_string(t->stallRetries) +
                 "): " + t->name + " a " + std::to_string(t->done) + "/" + std::to_string(t->total));
-            if (t->dir == Direction::Download && t->curFileId) {
+            if (t->curFileId) {
                 int32_t fid = t->curFileId;
                 td_->send({{"@type", "cancelDownloadFile"}, {"file_id", fid}, {"only_if_pending", false}});
                 td_->send({{"@type", "downloadFile"}, {"file_id", fid}, {"priority", 16},
@@ -259,9 +259,6 @@ void Engine::tick() {
                               std::lock_guard<std::recursive_mutex> lk1(mu_);
                               if (!TdClient::isError(r) && jint(r, "id") == fid) onFile(r);
                           });
-            } else if (t->dir == Direction::Upload && t->sendingMsgId) {
-                stopPendingUpload(*t);
-                uploadPath(*t, t->split ? t->tempPart : t->srcPath);
             }
         }
         schedule();
@@ -1062,6 +1059,12 @@ void Engine::resume(int id) {
     Transfer* t = find(id);
     if (!t) return;
     t->pauseRequested = false;
+    if (t->dir == Direction::Upload && t->prepared &&
+        (t->partIdx < 0 || t->partIdx >= t->partCount || t->partLen(t->partIdx) <= 0)) {
+        if (t->st == TStatus::Paused || t->st == TStatus::Error)
+            fail(*t, "Stato dell'invio non valido. Controlla le parti in chat e aggiungi di nuovo il file.");
+        return;
+    }
     if (t->st == TStatus::Paused || t->st == TStatus::Error) {
         t->st = TStatus::Queued;
         t->error.clear();
@@ -1160,7 +1163,7 @@ void Engine::schedule() {
         if (t->active()) ++active;
     for (auto& t : transfers_) {
         if (active >= settings_.maxParallel) break;
-        if (t->st == TStatus::Queued) {
+        if (t->st == TStatus::Queued && !t->stopWhenKnown) {
             ++active;
             startTransfer(*t);
         }
@@ -1269,7 +1272,7 @@ void Engine::startTransfer(Transfer& t) {
                 startUploadStep(tr);
                 changed();
             });
-        } else if (t.split && !t.tempPart.empty() && fileExists(t.tempPart)) {
+        } else if (t.split && !t.tempPart.empty() && fileSize(t.tempPart) == t.partLen(t.partIdx)) {
             uploadPath(t, t.tempPart);  // ripresa della stessa parte
         } else {
             startUploadStep(t);
@@ -1610,6 +1613,13 @@ void Engine::stopPendingUpload(Transfer& t) {
 // la fine con updateMessageSendSucceeded. (preliminaryUploadFile non completa mai il caricamento
 // finché il file non viene usato in un messaggio: non va usato qui.)
 void Engine::uploadPath(Transfer& t, const std::string& path) {
+    const int64_t size = fileSize(path);
+    if (size < 0) { fail(t, "File da inviare non accessibile"); return; }
+    if (size == 0) { fail(t, "Il file da inviare è vuoto (0 byte)"); return; }
+    if (size != t.partLen(t.partIdx)) {
+        fail(t, "La dimensione del file da inviare è cambiata");
+        return;
+    }
     t.st = TStatus::Active;
     t.sending = true;
     t.sendingMsgId = 0;
@@ -1639,7 +1649,7 @@ void Engine::uploadPath(Transfer& t, const std::string& path) {
                                   {"disable_content_type_detection", true}}}};
     if (!caption.empty()) content["caption"] = {{"@type", "formattedText"}, {"text", caption}};
     log("invio " + (t.split ? "parte " + std::to_string(t.partIdx + 1) + "/" + std::to_string(t.partCount) + " di " : std::string()) +
-        t.name + " (" + std::to_string(fileSize(path)) + " byte)");
+        t.name + " (" + std::to_string(size) + " byte)");
     int tid = t.id;
     td_->send({{"@type", "sendMessage"}, {"chat_id", t.chatId}, {"input_message_content", content}},
               [this, tid](const json& r) {
@@ -1648,8 +1658,10 @@ void Engine::uploadPath(Transfer& t, const std::string& path) {
                   if (!tx) return;
                   if (TdClient::isError(r)) {
                       tx->sending = false;
+                      bool stopped = tx->stopWhenKnown;
                       tx->stopWhenKnown = false;
                       if (tx->cancelRequested) { cancel(tid); return; }
+                      if (stopped) { schedule(); changed(); return; }
                       fail(*tx, "Invio non riuscito: " + jstr(r, "message"));
                       return;
                   }
@@ -1668,6 +1680,8 @@ void Engine::uploadPath(Transfer& t, const std::string& path) {
                       tx->stopWhenKnown = false;
                       stopPendingUpload(*tx);
                       if (tx->cancelRequested) { cancel(tid); return; }
+                      schedule();
+                      changed();
                       return;
                   }
                   if (file.is_object()) onFile(file);
@@ -1689,11 +1703,12 @@ void Engine::onSendSucceeded(int64_t oldMsgId, const json& msg) {
     if (it == sendingMsg_.end()) return;
     Transfer* t = find(it->second);
     sendingMsg_.erase(it);
-    if (!t) return;
+    if (!t || !t->sending || t->sendingMsgId != oldMsgId) return;
     t->sending = false;
     t->sendingMsgId = 0;
     fileToTransfer_.erase(t->upFileId);
     t->upFileId = 0;
+    if (t->st != TStatus::Active || t->partIdx < 0 || t->partIdx >= t->partCount) return;
     if (t->split && !t->tempPart.empty()) {
         removeFile(t->tempPart);
         t->tempPart.clear();
@@ -1735,9 +1750,13 @@ void Engine::onSendFailed(int64_t oldMsgId, const std::string& err) {
     if (it == sendingMsg_.end()) return;
     Transfer* t = find(it->second);
     sendingMsg_.erase(it);
-    if (!t) return;
+    if (!t || !t->sending || t->sendingMsgId != oldMsgId) return;
     t->sending = false;
+    t->sendingMsgId = 0;
+    fileToTransfer_.erase(t->upFileId);
+    t->upFileId = 0;
     if (t->cancelRequested) { cancel(t->id); return; }
+    if (t->st != TStatus::Active) return;
     // al prossimo tentativo si ricarica la stessa parte
     t->done = t->baseDone;
     fail(*t, "Invio non riuscito: " + err);
