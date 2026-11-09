@@ -8,6 +8,11 @@
 #include <cstdio>
 #include <thread>
 #include <ctime>
+#include <cctype>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include "FileIO.h"
 #include "Split.h"
@@ -744,11 +749,24 @@ static const char* filterType(Filter f) {
     }
 }
 
+static bool fileNameContains(const std::string& name, const std::string& query) {
+#ifdef _WIN32
+    const std::wstring wideName = u8p(name).wstring();
+    const std::wstring wideQuery = u8p(query).wstring();
+    return FindStringOrdinal(FIND_FROMSTART, wideName.data(), static_cast<int>(wideName.size()),
+                             wideQuery.data(), static_cast<int>(wideQuery.size()), TRUE) >= 0;
+#else
+    return std::search(name.begin(), name.end(), query.begin(), query.end(),
+                       [](unsigned char a, unsigned char b) { return std::tolower(a) == std::tolower(b); }) != name.end();
+#endif
+}
+
 void Engine::reloadList() {
     ++listGen_;
     entries_.clear();
     entryIndex_.clear();
     nextFromMsg_ = 0;
+    searchNames_ = false;
     listMore_ = false;
     totalCount_ = -1;
     if (!selChat_ || !td_) { changed(); return; }
@@ -769,7 +787,7 @@ void Engine::requestPage() {
     // Solo i campi stabili tra le versioni di TDLib: quelli mancanti prendono il valore predefinito.
     td_->send({{"@type", "searchChatMessages"},
                {"chat_id", selChat_},
-               {"query", query_},
+               {"query", searchNames_ ? std::string() : query_},
                {"from_message_id", nextFromMsg_},
                {"offset", 0},
                {"limit", 100},
@@ -783,6 +801,13 @@ void Engine::handlePage(uint64_t gen, const json& r) {
     listLoading_ = false;
     if (TdClient::isError(r)) {
         listMore_ = false;
+        if (!query_.empty() && !searchNames_ && entries_.empty()) {
+            searchNames_ = true;
+            nextFromMsg_ = 0;
+            requestPage();
+        } else if (!query_.empty()) {
+            notice("Ricerca non riuscita: " + jstr(r, "message"), true);
+        }
         changed();
         return;
     }
@@ -793,14 +818,23 @@ void Engine::handlePage(uint64_t gen, const json& r) {
         for (auto& m : msgs) {
             std::vector<FileEntry> v;
             addMessage(m, v);
-            for (auto& e : v) mergeEntry(e);
+            for (auto& e : v)
+                if (!searchNames_ || fileNameContains(e.name, query_)) mergeEntry(e);
             lastId = jint(m, "id");
         }
     }
     int64_t next = jint(r, "next_from_message_id");
     if (!r.contains("next_from_message_id")) next = lastId;  // versioni vecchie
-    listMore_ = msgs.is_array() && !msgs.empty() && next != 0;
+    listMore_ = next != 0 && (nextFromMsg_ == 0 || next < nextFromMsg_);
     nextFromMsg_ = next;
+    if (!listMore_ && !query_.empty() && !searchNames_ && entries_.empty()) {
+        // L'indice di Telegram può ignorare parole dentro nomi con separatori come "_".
+        searchNames_ = true;
+        nextFromMsg_ = 0;
+        requestPage();
+        changed();
+        return;
+    }
     // Con "Tutti" molte righe sono testo: se la pagina ha portato pochi file, continua.
     if (listMore_ && entries_.size() - before < 20 && entries_.size() < 60) requestPage();
     changed();
