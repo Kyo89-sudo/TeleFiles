@@ -1,0 +1,78 @@
+name: Build Windows
+
+on:
+  push:
+    branches: [codex/windows-build]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}\vcpkg
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\vcpkg-cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versione
+        id: ver
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path src/app/Version.h -Pattern '"(\d+\.\d+\.\d+)"').Matches[0].Groups[1].Value
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "Versione $v"
+
+      # vcpkg completo (serve la cronologia per il "builtin-baseline" di vcpkg.json)
+      - name: vcpkg
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg "$env:VCPKG_ROOT"
+          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+          New-Item -ItemType Directory -Force "$env:VCPKG_DEFAULT_BINARY_CACHE" | Out-Null
+
+      # TDLib richiede molto a compilare: la cache la conserva tra una release e l'altra
+      - name: Cache delle librerie
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}\vcpkg-cache
+          key: vcpkg-x64-windows-static-${{ hashFiles('vcpkg.json') }}
+          restore-keys: vcpkg-x64-windows-static-
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Compila
+        shell: cmd
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ^
+            -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%\scripts\buildsystems\vcpkg.cmake" ^
+            -DVCPKG_TARGET_TRIPLET=x64-windows-static -DVCPKG_INSTALL_OPTIONS=--clean-after-build
+          if errorlevel 1 exit /b 1
+          cmake --build build --config Release
+          if errorlevel 1 exit /b 1
+
+      - name: Pacchetti
+        shell: pwsh
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          New-Item -ItemType Directory -Force dist | Out-Null
+          # versione normale: dati in %LOCALAPPDATA%\TeleFiles
+          $n = "dist\TeleFiles-$v"
+          New-Item -ItemType Directory -Force $n | Out-Null
+          Copy-Item build\TeleFiles.exe, api.ini.example, README.md $n
+          Compress-Archive -Path "$n\*" -DestinationPath "dist\TeleFiles-$v-win64.zip"
+          # versione portable: tutto accanto all'exe
+          $p = "dist\TeleFiles-$v-portable"
+          New-Item -ItemType Directory -Force $p | Out-Null
+          Copy-Item build\TeleFiles.exe, api.ini.example, portable\LEGGIMI.txt, portable\TeleFiles.portable $p
+          Compress-Archive -Path "$p\*" -DestinationPath "dist\TeleFiles-$v-portable.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TeleFiles-${{ steps.ver.outputs.version }}
+          path: dist/*.zip
+
