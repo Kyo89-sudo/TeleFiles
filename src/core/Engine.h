@@ -260,6 +260,7 @@ private:
     std::map<std::string, size_t> entryIndex_;
     uint64_t listGen_ = 0;
     int64_t nextFromMsg_ = 0;
+    bool searchNames_ = false;
     bool listLoading_ = false, listMore_ = false;
     int64_t totalCount_ = -1;
 
